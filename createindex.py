@@ -1,9 +1,12 @@
 """
 This file contains your code to create the inverted index. Besides implementing and using the predefined tokenization function (text2tokens), there are no restrictions in how you organize this file.
 """
+import pickle
 import string
+import sys
 from time import time
 
+import numpy
 import numpy as np
 import pandas
 import pandas as pd
@@ -16,6 +19,7 @@ from nltk.corpus import stopwords
 from typing import Dict, List
 import logging
 import json
+from multiprocessing import Pool
 
 LOGGER = logging.getLogger('createindex')
 
@@ -35,16 +39,23 @@ def timed(level=15):
 
 
 @timed()
-def text2tokens(text: str) -> List[str]:
+def text2tokens(text: str, pool: Pool = None) -> List[str]:
     """
+    :param pool:
     :param text: a text string
     :return: a tokenized string with preprocessing (e.g. stemming, stopword removal, ...) applied
     """
 
-    # Stemming takes the longest by far
+    # Stemming takes the longest by far -> use multiprocessing to reduce times
 
     tokens = tokenize(text)
-    stemmed = stem(tokens)
+
+    if pool is None:
+        # open new pool if None was parsed
+        with Pool(6) as pool:
+            stemmed = stem(tokens, pool)
+    else:
+        stemmed = stem(tokens, pool)
 
     return stemmed
 
@@ -65,14 +76,11 @@ def tokenize(text: str) -> List[str]:
     LOGGER.debug(f"Tokenizing: {text[:20]}")
 
     init_time = time()
-    LOGGER.info(f"Init time: {(init_time - start_time):.6f}")
+    # LOGGER.debug(f"Init time: {(init_time - start_time):.6f}")
 
     # remove unicode chars
     text_clean = re.sub(r'[^\x00-\x7F]+', ' ', text)
     LOGGER.debug(text_clean)
-
-    # remove new lines and tabs
-    text_clean = re.sub(r'(\t\n(/n)(/t))+', ' ', text_clean)
 
     # lowercase
     text_clean = text_clean.lower()
@@ -83,11 +91,11 @@ def tokenize(text: str) -> List[str]:
     LOGGER.debug(text_clean)
 
     # remove multi space
-    text_clean = re.sub(r'\s{+}', ' ', text_clean)
+    text_clean = re.sub(r'\s+', ' ', text_clean)
     LOGGER.debug(text_clean)
 
     regex_time = time()
-    LOGGER.info(f"Regex time: {(regex_time - init_time):.6f}")
+    # LOGGER.debug(f"Regex time: {(regex_time - init_time):.6f}")
 
     # filter stopwords and empty string
     tokens = [w for w in text_clean.split(" ") if (w not in sw and w != "")]
@@ -96,10 +104,10 @@ def tokenize(text: str) -> List[str]:
 
 
 @timed()
-def stem(tokens: List[str]) -> List[str]:
+def stem(tokens: List[str], pool: Pool) -> List[str]:
     ps = PorterStemmer()
 
-    text_stemmed = [ps.stem(w) for w in tokens]
+    text_stemmed = pool.map(ps.stem, tokens)
     LOGGER.debug(text_stemmed)
 
     return text_stemmed
@@ -117,108 +125,162 @@ def add_to_inverted_index(inv_i: pd.Series, tokens: List[str], doc_id: int):
 
 
 @timed()
-def create_index(tokens: List[str], doc: int):
+def create_index(tokens: List[str], doc: np.uint16):
     LOGGER.debug(f"Creating index for tokens")
 
-    tokens_series = pd.Series(tokens)
+    # tokens.sort()
 
-    grouped = tokens_series.groupby(tokens_series)
-    indices = grouped.indices
+    rev_index_doc = {}
+    for i in range(len(tokens)):
+        token = tokens[i]
 
-    indices_series = pd.Series(indices)
-    indices_series = pd.concat([indices_series], keys=[doc])
-    indices_series = indices_series.swaplevel()
+        if token not in rev_index_doc:
+            rev_index_doc[token] = []
 
-    return indices_series
+        rev_index_doc[tokens[i]].append(i)
 
+    for token, val in rev_index_doc.items():
+        rev_index_doc[token] = len(val)
+        # rev_index_doc[token] = np.uint16(val)
 
-@timed()
-def merge_to_index(inv_i: pd.Series, doc_i: pd.Series):
-    pass
-
-
-@timed()
-def save(path, data: pd.Series):
-    LOGGER.debug("Saving file")
+    # tokens_series = pd.Series(tokens)
+    # cnt = pd.Series(range(0, len(tokens)), dtype=np.uint16)
     #
+    # tokens_df = pd.DataFrame({'cnt': cnt, 'tokens': tokens_series})
+    # grouped = tokens_df.groupby('tokens', group_keys=False)
+    #
+    # # grouped = tokens_series.groupby(tokens_series)
+    # indices = grouped.indices
+    #
+    # indices_series = pd.Series(indices)
+    # indices_series = pd.concat([indices_series], keys=[doc])
+    # indices_series = indices_series.swaplevel()
+    # indices_series = indices_series.apply(lambda x: x.astype(np.uint16))
+    #
+    # size = sys.getsizeof(test)
+    # for val in test:
+    #     size += sys.getsizeof(val)
+
+    return rev_index_doc
+
+
+def calc_dict_size(d):
+    d_size = sys.getsizeof(d)
+    size = 0
+    for token, arr in d.items():
+        size += arr.nbytes
+
+    LOGGER.warning(f"Dict size: {d_size}, Array size: {size}")
+
+
+@timed()
+def merge_to_index(inv_i: Dict[str, np.ndarray], articles: Dict[np.ushort, Dict[str, np.uint16]]):
+    # LOGGER.info(f"Articles: length: {len(articles)} bytes: {(sys.getsizeof(articles)):,}")
+    # LOGGER.info(f"Inverted index: length: {len(inv_i)} bytes: {(sys.getsizeof(inv_i)):,}")
+
+    for doc_id, doc in articles.items():
+        for token, cnt in doc.items():
+            if token not in inv_i:
+                inv_i[token] = np.array([], dtype=[('docid', np.uint16), ('tf', np.uint16)])
+
+            arr: np.ndarray = inv_i[token]
+            inv_i[token] = np.append(arr, np.array((doc_id, cnt), dtype=[('docid', np.uint16), ('tf', np.uint16)]))
+
+    return inv_i
+
+
+# size = 0
+# for article in articles:
+#     size += sys.getsizeof(article)
+# LOGGER.warning(f"SIZE: {size}")
+#
+# articles_series = pd.concat(articles)
+#
+# LOGGER.info(f"Articles series: length: {len(articles_series)} bytes: {(sys.getsizeof(articles_series)):,}")
+#
+# return pd.concat([inv_i, articles_series])
+
+
+@timed()
+def save(path, data: dict):
+    LOGGER.info("Saving file")
+
     if not os.path.exists(os.path.dirname(path)):
         os.makedirs(os.path.dirname(path))
 
-    # data.to_csv(os.path.join(path, "inverted_index.csv"))
-    # data.to_json(os.path.join(path, "inverted_index.json"))
-    #
-    # with open(path, "w") as f:
-    #     json.dump(data, f, indent=3, sort_keys=True)
+    print(len(data))
+    np.save(os.path.join(path, "inverted_index.npy"), data)
+    # np.savez_compressed(os.path.join(path, "inverted_index.npy"), data)
 
-    data = data.sort_index()
 
-    # TODO:
+@timed()
+def load(path) -> {}:
+    LOGGER.info("Loading File")
 
-    print(data)
+    data = np.load(path, allow_pickle=True)['arr_0'][()]
 
-    d = {}
-
-    # for token in data.index.get_level_values(0):
-    #     # s = {}
-    #     # for doc_id in data[token]:
-    #     #     s[doc_id] =
-    #
-    #     d[token] = data[token]
-    print(d)
+    return data
 
 
 @timed(20)
-def load_files(data_path):
+def process_data(data_path):
     # load wiki files
     LOGGER.info(f"Loading files for path: {data_path}")
 
     time_start = time()
-    inv_i = pd.Series()
+    # inv_i = pd.Series(dtype=np.uint16)
+    inv_i = {}
+    documents = 0
 
-    for file_path in glob.iglob(os.path.join(data_path, "wikipedia articles", "1.xml")):
-        LOGGER.info(f"Loading file: {file_path}")
+    with Pool(processes=6) as pool:
+        for file_path in glob.iglob(os.path.join(data_path, "wikipedia articles", "1.xml")):
+            time_globbing = time()
+            LOGGER.info(f"Loading file: {file_path}")
 
-        with open(file_path, 'r', encoding='utf-8') as f:
-            soup = BeautifulSoup(f, 'html.parser')
+            with open(file_path, 'r', encoding='utf-8') as f:
+                soup = BeautifulSoup(f, 'html.parser')
+
+                articles = {}
+
+                for article in soup.find_all('article', recursive=False):
+                    doc_id = np.uint32(article.find('header', recursive=False).find('id', recursive=False).text)
+                    bdy = article.find('bdy', recursive=False)
+
+                    if not (bdy is None or doc_id is None):
+                        tokens = text2tokens(bdy.text, pool)
+                        doc_index = create_index(tokens, doc_id)
+
+                        articles[doc_id] = doc_index
+
+                inv_i = merge_to_index(inv_i, articles)
+                print(inv_i)
+                # LOGGER.info(f"Articles: length: {len(articles)} bytes: {(sys.getsizeof(articles)):,}")
+                # LOGGER.info(f"Inverted index: length: {len(inv_i)} bytes: {(sys.getsizeof(inv_i)):,}")
+                calc_dict_size(inv_i)
 
             time_file_loaded = time()
-            LOGGER.info(f"File loading time: {(time_file_loaded - time_start):.4f}")
+            LOGGER.info(
+                f"File loading time: {(time_file_loaded - time_globbing):.4f} since start: {(time_file_loaded - time_start):.4f}")
 
-            articles = []
-
-            for article in soup.find_all('article', recursive=False):
-                doc_id = int(article.find('header', recursive=False).find('id', recursive=False).text)
-                bdy = article.find('bdy', recursive=False)
-
-                if not (bdy is None or doc_id is None):
-                    tokens = text2tokens(bdy.text)
-                    doc_index = create_index(tokens, doc_id)
-
-                    articles.append(doc_index)
-
-                    # inv_i = pd.concat([pd.concat([doc_index], keys=[doc_id]), inv_i])
-
-                    # print(doc_index)
-                    # merge_to_index(inv_i, doc_index)
-                    # add_to_inverted_index(inv_i, tokens, int(doc_id.text))
-
-            inv_i = pd.concat([pd.concat(articles), inv_i])
+    # Sort by docid for efficient data retrieval (O(log(n)) instead of O(n))
+    for token, arr in inv_i.items():
+        # print(token)
+        # print(arr)
+        arr.sort(order='docid')
+        # print(arr)
 
     save(os.path.join("..", "out"), inv_i)
 
-    # inv_i_list = {}
-    # for key, value in inv_i.items():
-    #     inv_i_list[key] = list(value)
-
-    # save_to_json(os.path.join("..", "out", "inverted_index.json"), inv_i_list)
-    # save_to_json(os.path.join("..", "out", "inverted_index_keys.json"), list(inv_i.keys()))
-
 
 if __name__ == "__main__":
-    logging.basicConfig(level=15)
+    logging.basicConfig(level=20)
     logging.addLevelName(15, "TIMING")
     # replace with individual path to dataset
-    LOGGER.info("Starting index creation...")
-    load_files(os.path.join("..", "..", "dataset"))
+    LOGGER.debug("Starting index creation...")
+    process_data(os.path.join("..", "..", "dataset"))
 
-    # text2tokens("I have an ssd and I like it. This is good! I like it.")
+    # d = load(os.path.join("..", "out", "inverted_index.npy.npz"))
+    # print(d)
+
+    # with Pool(6) as pool:
+    #     text2tokens("I have an ssd and I\n\t\t\t like it. This is good! I like it.", pool)
