@@ -125,10 +125,8 @@ def add_to_inverted_index(inv_i: pd.Series, tokens: List[str], doc_id: int):
 
 
 @timed()
-def create_index(tokens: List[str], doc: np.uint16):
+def create_index(tokens: List[str], doc: np.uint32):
     LOGGER.debug(f"Creating index for tokens")
-
-    # tokens.sort()
 
     rev_index_doc = {}
     for i in range(len(tokens)):
@@ -141,64 +139,56 @@ def create_index(tokens: List[str], doc: np.uint16):
 
     for token, val in rev_index_doc.items():
         rev_index_doc[token] = len(val)
-        # rev_index_doc[token] = np.uint16(val)
-
-    # tokens_series = pd.Series(tokens)
-    # cnt = pd.Series(range(0, len(tokens)), dtype=np.uint16)
-    #
-    # tokens_df = pd.DataFrame({'cnt': cnt, 'tokens': tokens_series})
-    # grouped = tokens_df.groupby('tokens', group_keys=False)
-    #
-    # # grouped = tokens_series.groupby(tokens_series)
-    # indices = grouped.indices
-    #
-    # indices_series = pd.Series(indices)
-    # indices_series = pd.concat([indices_series], keys=[doc])
-    # indices_series = indices_series.swaplevel()
-    # indices_series = indices_series.apply(lambda x: x.astype(np.uint16))
-    #
-    # size = sys.getsizeof(test)
-    # for val in test:
-    #     size += sys.getsizeof(val)
 
     return rev_index_doc
 
 
+@timed(20)
 def calc_dict_size(d):
     d_size = sys.getsizeof(d)
     size = 0
     for token, arr in d.items():
         size += arr.nbytes
 
-    LOGGER.warning(f"Dict size: {d_size}, Array size: {size}")
+    LOGGER.warning(f"Dict size: {d_size:,}, Array size: {size:,}")
 
 
-@timed()
+@timed(20)
 def merge_to_index(inv_i: Dict[str, np.ndarray], articles: Dict[np.ushort, Dict[str, np.uint16]]):
     # LOGGER.info(f"Articles: length: {len(articles)} bytes: {(sys.getsizeof(articles)):,}")
     # LOGGER.info(f"Inverted index: length: {len(inv_i)} bytes: {(sys.getsizeof(inv_i)):,}")
 
+    merged = {}
+
+    # transform to inverted index first
     for doc_id, doc in articles.items():
         for token, cnt in doc.items():
-            if token not in inv_i:
-                inv_i[token] = np.array([], dtype=[('docid', np.uint16), ('tf', np.uint16)])
+            if token not in merged:
+                merged[token] = [(doc_id, cnt)]
+            else:
+                merged[token].append((doc_id, cnt))
 
-            arr: np.ndarray = inv_i[token]
-            inv_i[token] = np.append(arr, np.array((doc_id, cnt), dtype=[('docid', np.uint16), ('tf', np.uint16)]))
+    # append to global inverted index
+    for token, value in merged.items():
+        if token not in inv_i:
+            inv_i[token] = np.array(value, dtype=[('docid', np.uint32), ('tf', np.uint32)])
+
+        else:
+            inv_i[token] = np.append(inv_i[token],
+                                     np.array(value, dtype=[('docid', np.uint32), ('tf', np.uint32)]))
+
+    # print(inv_i)
+
+    # for doc_id, doc in articles.items():
+    #     for token, cnt in doc.items():
+    #         if token not in inv_i:
+    #             inv_i[token] = np.array([], dtype=[('docid', np.uint32), ('tf', np.uint32)])
+    #
+    #         arr: np.ndarray = inv_i[token]
+    #         inv_i[token] = np.concatenate(
+    #             (arr, np.array((doc_id, cnt), dtype=[('docid', np.uint32), ('tf', np.uint32)])))
 
     return inv_i
-
-
-# size = 0
-# for article in articles:
-#     size += sys.getsizeof(article)
-# LOGGER.warning(f"SIZE: {size}")
-#
-# articles_series = pd.concat(articles)
-#
-# LOGGER.info(f"Articles series: length: {len(articles_series)} bytes: {(sys.getsizeof(articles_series)):,}")
-#
-# return pd.concat([inv_i, articles_series])
 
 
 @timed()
@@ -210,14 +200,14 @@ def save(path, data: dict):
 
     print(len(data))
     np.save(os.path.join(path, "inverted_index.npy"), data)
-    # np.savez_compressed(os.path.join(path, "inverted_index.npy"), data)
+    np.savez_compressed(os.path.join(path, "inverted_index.npy.npz"), data)
 
 
 @timed()
 def load(path) -> {}:
     LOGGER.info("Loading File")
 
-    data = np.load(path, allow_pickle=True)['arr_0'][()]
+    data = np.load(path, allow_pickle=True)[()]  # ['arr_0'][()]
 
     return data
 
@@ -233,7 +223,7 @@ def process_data(data_path):
     documents = 0
 
     with Pool(processes=6) as pool:
-        for file_path in glob.iglob(os.path.join(data_path, "wikipedia articles", "1.xml")):
+        for file_path in glob.iglob(os.path.join(data_path, "wikipedia articles", "*.xml")):
             time_globbing = time()
             LOGGER.info(f"Loading file: {file_path}")
 
@@ -253,7 +243,6 @@ def process_data(data_path):
                         articles[doc_id] = doc_index
 
                 inv_i = merge_to_index(inv_i, articles)
-                print(inv_i)
                 # LOGGER.info(f"Articles: length: {len(articles)} bytes: {(sys.getsizeof(articles)):,}")
                 # LOGGER.info(f"Inverted index: length: {len(inv_i)} bytes: {(sys.getsizeof(inv_i)):,}")
                 calc_dict_size(inv_i)
@@ -264,10 +253,7 @@ def process_data(data_path):
 
     # Sort by docid for efficient data retrieval (O(log(n)) instead of O(n))
     for token, arr in inv_i.items():
-        # print(token)
-        # print(arr)
         arr.sort(order='docid')
-        # print(arr)
 
     save(os.path.join("..", "out"), inv_i)
 
@@ -278,8 +264,9 @@ if __name__ == "__main__":
     # replace with individual path to dataset
     LOGGER.debug("Starting index creation...")
     process_data(os.path.join("..", "..", "dataset"))
-
-    # d = load(os.path.join("..", "out", "inverted_index.npy.npz"))
+    #
+    # d = load(os.path.join("..", "out", "inverted_index.npy"))
+    # print(len(d))
     # print(d)
 
     # with Pool(6) as pool:
