@@ -93,12 +93,6 @@ def tf_idf(data_path: str):
     TF_IDF = {}
     N = len(word_count)
 
-    # Calculate DF
-    #for topic_id, tokens in topics.items():
-        #for token in tokens:
-            #if token in dataset:
-                #df[token] = dataset[token]['tf'].sum()
-
     # Calculate tf-idf for query
     tf_idf_query = {}
     for topic_id, tokens in topics.items():
@@ -110,24 +104,37 @@ def tf_idf(data_path: str):
                 tf_query = collections.Counter(tokens)[token]/len(tokens)
                 scores.append(np.log(1+tf_query) * idf)
 
-        #for score in scores:
-            #scores_normalized.append(score / np.linalg.norm(scores))
+        for score in scores:
+            scores_normalized.append(score / np.linalg.norm(scores, ord=1))
 
-        tf_idf_query[topic_id] = np.array(scores, dtype=numpy.float16)
+        tf_idf_query[topic_id] = np.array(scores_normalized, dtype=numpy.float32)
+
 
     # Calculate tf-idf for documents
     for topic_id, tokens in topics.items():
         scores = []
-        scores_normalized = []
-        for token in tokens:
+        doc_dict = {}
+        for i in range(len(tokens)):
+            token = tokens[i]
             if token in dataset:
-                idf = np.log(N / (len(dataset[token])+1))
+                idf = np.log(1+(N / (len(dataset[token]))))
                 for tup in dataset[token]:
-                    tf_document = tup['tf'] / word_count[tup['docid']]
-                    scores.append((tup['docid'], token, (np.log(1+tf_document)*idf)))
+                    if tup['docid'] not in doc_dict:
+                        doc_dict[tup['docid']] = np.zeros(len(tokens), dtype=np.float32)
 
-        TF_IDF[topic_id] = np.array(scores,
-                                    dtype=[('docid', np.uint32), ('token', '<U20'), ('tfidf', np.float16)])
+                    tf_document = tup['tf'] / word_count[tup['docid']]
+                    #scores.append((tup['docid'], token, (np.log(1+tf_document)*idf)))
+                    doc_dict[tup['docid']][i] = np.log(1+tf_document)*idf
+
+        # topicid: {docid: [0.009, 0.122]}
+
+        # tfidf query topicid: [0.08, 0.9]
+        #
+        # docid: [0.08, 0.9] * [0.009, 0.122] = [x, y] x+y = score
+        for doc_id, arr in doc_dict.items():
+            doc_dict[doc_id] = arr/np.linalg.norm(arr, ord=1)
+
+        TF_IDF[topic_id] = doc_dict
 
     return TF_IDF
 
