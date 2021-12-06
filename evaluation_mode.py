@@ -10,7 +10,7 @@ import createindex
 import numpy as np
 from multiprocessing import Pool
 import collections
-from collections import defaultdict
+import json
 
 
 LOGGER = logging.getLogger('evaluation_mode')
@@ -153,6 +153,7 @@ def tf_idf():
 
 def printable_res(sorted_tfidf: dict, run_name: str):
     string_dict = {}
+    big_list = []
 
     for topic_id, arr in sorted_tfidf.items():
         lis = []
@@ -163,18 +164,28 @@ def printable_res(sorted_tfidf: dict, run_name: str):
                 score = '{:.2f}'.format(tup['score'])
                 string = f'{{{topic_id}}} Q0 {{{doc_id}}} {{{counter+1}}} {{{score}}} {{{run_name}}}'
                 lis.append(string)
+                big_list.append(string)
                 counter += 1
 
         string_dict[topic_id] = np.array(lis, dtype='<U100')
 
-    return string_dict
+    save(os.path.join('out'), big_list)
+
+    #return string_dict
+
+
+def save(path, data: list):
+
+    file_path = os.path.join(path, 'tfidf_title_only.txt')
+    textfile = open(file_path, 'w')
+    for element in data:
+        textfile.write(element + '\n')
+    textfile.close()
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=10)
     tifu = tf_idf()
-    to_print = printable_res(tifu, 'run 1')
+    printable_res(tifu, 'run 1')
     #dataset = createindex.load(os.path.join('out', 'inverted_index.npy'))
-    print(to_print)
-
-# TODO: Save file properly
+    #print(to_print)
