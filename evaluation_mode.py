@@ -43,10 +43,9 @@ def document_number(path: str):
     return len(titles)
 
 
-def tf_idf(data_path: str):
+def tf_idf():
     """
 
-    :param data_path: path to apply algorithm to
     :return: outputs the top-100 documents in the following format
     {topic-id}  Q0  {document-id}  {rank}  {score}  {run-name}
 
@@ -63,11 +62,11 @@ def tf_idf(data_path: str):
     run-name a name you give to your experiment
 
     FORMULA for TF-IDF:
-    tf(t,d) = count of t in d / number of words in d
+    tf(t,d) = log(1 + count of t in d / number of words in d)
 
     df(t) = occurrence of t in N documents
 
-    idf(t) = log(N/(df + 1))
+    idf(t) = log(1+(N/(df)))
 
     tf-idf(t, d) = tf(t, d) * idf(t)
 
@@ -98,11 +97,14 @@ def tf_idf(data_path: str):
     for topic_id, tokens in topics.items():
         scores = []
         scores_normalized = []
-        for token in tokens:
+        for i in range(len(tokens)):
+            token = tokens[i]
             if token in dataset:
                 idf = np.log(N / (len(dataset[token]) + 1))
                 tf_query = collections.Counter(tokens)[token]/len(tokens)
                 scores.append(np.log(1+tf_query) * idf)
+            else:
+                scores.append(0)
 
         for score in scores:
             scores_normalized.append(score / np.linalg.norm(scores, ord=1))
@@ -136,10 +138,43 @@ def tf_idf(data_path: str):
 
         TF_IDF[topic_id] = doc_dict
 
-    return TF_IDF
+    tf_idf_topic_documents = {}
+    for topic_id, dic in TF_IDF.items():
+        vector = tf_idf_query[topic_id]
+        scores = []
+        for doc_id in dic:
+            scores.append((doc_id, np.dot(vector, dic[doc_id])))
+
+        tf_idf_topic_documents[topic_id] = np.array(scores, dtype=[('docid', np.uint32), ('score', np.float32)])
+        tf_idf_topic_documents[topic_id] = np.sort(tf_idf_topic_documents[topic_id], order='score')[::-1]
+
+    return tf_idf_topic_documents
+
+
+def printable_res(sorted_tfidf: dict, run_name: str):
+    string_dict = {}
+
+    for topic_id, arr in sorted_tfidf.items():
+        lis = []
+        counter = 0
+        for tup in arr:
+            if counter < 100:
+                doc_id = tup['docid']
+                score = '{:.2f}'.format(tup['score'])
+                string = f'{{{topic_id}}} Q0 {{{doc_id}}} {{{counter+1}}} {{{score}}} {{{run_name}}}'
+                lis.append(string)
+                counter += 1
+
+        string_dict[topic_id] = np.array(lis, dtype='<U100')
+
+    return string_dict
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=10)
-    tifu = tf_idf('ha')
-    print(tifu)
+    tifu = tf_idf()
+    to_print = printable_res(tifu, 'run 1')
+    #dataset = createindex.load(os.path.join('out', 'inverted_index.npy'))
+    print(to_print)
+
+# TODO: Save file properly
