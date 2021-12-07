@@ -62,18 +62,25 @@ def tf_idf():
     run-name a name you give to your experiment
 
     FORMULA for TF-IDF:
-    tf(t,d) = log(1 + count of t in d / number of words in d)
+    tf(t,d) = count of t in d / number of words in d
 
     df(t) = occurrence of t in N documents
 
-    idf(t) = log(1+(N/(df)))
+    idf(t) = log(N/(df))
 
-    tf-idf(t, d) = tf(t, d) * idf(t)
+    tf-idf(t, d) = log(1+tf(t, d)) * idf(t)
 
     dataset = {
                 t1: [(1, 1), (572, 4)]
                 t2: ...
                }
+
+
+    topicid: {docid: [0.009, 0.122]}
+
+    tfidf query topicid: [0.08, 0.9]
+
+    docid: [0.08, 0.9] * [0.009, 0.122] = [x, y] x+y = score
 
     """
     LOGGER.info('Ranking results with TF-IDF')
@@ -96,12 +103,12 @@ def tf_idf():
     tf_idf_query = {}
     for topic_id, tokens in topics.items():
         scores = []
-        scores_normalized = []
         for i in range(len(tokens)):
             token = tokens[i]
             if token in dataset:
                 idf = np.log(N / len(dataset[token]))
-                tf_query = collections.Counter(tokens)[token]/len(tokens)
+                #tf_query = collections.Counter(tokens)[token]/len(tokens)
+                tf_query = collections.Counter(tokens)[token]
                 scores.append(np.log(1+tf_query) * idf)
             else:
                 scores.append(0)
@@ -111,7 +118,6 @@ def tf_idf():
 
     # Calculate tf-idf for documents
     for topic_id, tokens in topics.items():
-        scores = []
         doc_dict = {}
         for i in range(len(tokens)):
             token = tokens[i]
@@ -121,14 +127,9 @@ def tf_idf():
                     if tup['docid'] not in doc_dict:
                         doc_dict[tup['docid']] = np.zeros(len(tokens), dtype=np.float32)
 
-                    tf_document = tup['tf'] / word_count[tup['docid']]
+                    #tf_document = tup['tf'] / word_count[tup['docid']]
+                    tf_document = tup['tf']
                     doc_dict[tup['docid']][i] = np.log(1+tf_document)*idf
-
-        # topicid: {docid: [0.009, 0.122]}
-
-        # tfidf query topicid: [0.08, 0.9]
-        #
-        # docid: [0.08, 0.9] * [0.009, 0.122] = [x, y] x+y = score
 
         TF_IDF[topic_id] = doc_dict
 
@@ -143,6 +144,66 @@ def tf_idf():
         tf_idf_topic_documents[topic_id] = np.sort(tf_idf_topic_documents[topic_id], order='score')[::-1]
 
     return tf_idf_topic_documents
+
+
+def bm25(k1: float, b: float):
+    LOGGER.info('Ranking results with BM25')
+    dataset = createindex.load(os.path.join('out', 'inverted_index.npy'))
+    topics = parse_topics('GIR2021 dataset')
+    word_count = {}
+    avg_doc_length = 0
+    TF = {}
+
+    for token, arr in dataset.items():
+        for tup in arr:
+            if tup['docid'] not in word_count:
+                word_count[tup['docid']] = tup['tf']
+            else:
+                word_count[tup['docid']] += tup['tf']
+
+    N = len(word_count)
+    tmp = []
+    for wc in word_count:
+        tmp.append(word_count[wc])
+
+    avg_doc_length = np.mean(tmp)
+
+    # Calculate tf-idf for documents
+    for topic_id, tokens in topics.items():
+        doc_dict = {}
+        for i in range(len(tokens)):
+            token = tokens[i]
+            if token in dataset:
+                for tup in dataset[token]:
+                    if tup['docid'] not in doc_dict:
+                        doc_dict[tup['docid']] = np.zeros(len(tokens), dtype=np.float32)
+
+                    # tf_document = tup['tf'] / word_count[tup['docid']]
+                    tf_document = tup['tf']
+                    doc_dict[tup['docid']][i] = tf_document
+
+        TF[topic_id] = doc_dict
+
+    bm25_record = {}
+    for topic_id, tokens in topics.items():
+        doc_dict = TF[topic_id]
+        scores = []
+        for docid in doc_dict:
+            add = 0
+            for i in range(len(tokens)):
+                token = tokens[i]
+                if token in dataset:
+                    const = np.log(N / len(dataset[token]))
+                    numerator = (k1+1)*TF[topic_id][docid][i]
+                    denominator = k1*((1-b)+b*(word_count[docid]/avg_doc_length))+TF[topic_id][docid][i]
+                    op = const*(numerator/denominator)
+                    add += op
+            scores.append((docid, add))
+
+        bm25_record[topic_id] = np.array(scores, dtype=[('docid', np.uint32), ('score', np.float32)])
+        bm25_record[topic_id] = np.sort(bm25_record[topic_id], order='score')[::-1]
+
+    return bm25_record
 
 
 def printable_res(sorted_tfidf: dict, run_name: str):
@@ -165,12 +226,10 @@ def printable_res(sorted_tfidf: dict, run_name: str):
 
     save(os.path.join('out'), big_list)
 
-    #return string_dict
-
 
 def save(path, data: list):
 
-    file_path = os.path.join(path, 'tfidf_title_only.txt')
+    file_path = os.path.join(path, 'bm25_title_only.txt')
     textfile = open(file_path, 'w')
     for element in data:
         textfile.write(element + '\n')
@@ -179,7 +238,9 @@ def save(path, data: list):
 
 if __name__ == "__main__":
     logging.basicConfig(level=10)
-    tifu = tf_idf()
-    printable_res(tifu, 'run 1')
+    # tifu = tf_idf()
+    # printable_res(tifu, 'run 1')
     #dataset = createindex.load(os.path.join('out', 'inverted_index.npy'))
     #print(to_print)
+    bm = bm25(1.25, 0.75)
+    printable_res(bm, 'run 2')
