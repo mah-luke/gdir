@@ -92,7 +92,7 @@ def tf_idf():
     TF_IDF = {}
     N = len(word_count)
 
-    # Calculate tf-idf for query
+    #Calculate tf-idf for query
     tf_idf_query = {}
     for topic_id, tokens in topics.items():
         scores = []
@@ -100,16 +100,13 @@ def tf_idf():
         for i in range(len(tokens)):
             token = tokens[i]
             if token in dataset:
-                idf = np.log(N / (len(dataset[token]) + 1))
+                idf = np.log(N / len(dataset[token]))
                 tf_query = collections.Counter(tokens)[token]/len(tokens)
                 scores.append(np.log(1+tf_query) * idf)
             else:
                 scores.append(0)
 
-        for score in scores:
-            scores_normalized.append(score / np.linalg.norm(scores, ord=1))
-
-        tf_idf_query[topic_id] = np.array(scores_normalized, dtype=numpy.float32)
+        tf_idf_query[topic_id] = np.array(scores, dtype=numpy.float32)
 
 
     # Calculate tf-idf for documents
@@ -119,13 +116,12 @@ def tf_idf():
         for i in range(len(tokens)):
             token = tokens[i]
             if token in dataset:
-                idf = np.log(1+(N / (len(dataset[token]))))
+                idf = np.log(N / (len(dataset[token])))
                 for tup in dataset[token]:
                     if tup['docid'] not in doc_dict:
                         doc_dict[tup['docid']] = np.zeros(len(tokens), dtype=np.float32)
 
                     tf_document = tup['tf'] / word_count[tup['docid']]
-                    #scores.append((tup['docid'], token, (np.log(1+tf_document)*idf)))
                     doc_dict[tup['docid']][i] = np.log(1+tf_document)*idf
 
         # topicid: {docid: [0.009, 0.122]}
@@ -133,8 +129,6 @@ def tf_idf():
         # tfidf query topicid: [0.08, 0.9]
         #
         # docid: [0.08, 0.9] * [0.009, 0.122] = [x, y] x+y = score
-        for doc_id, arr in doc_dict.items():
-            doc_dict[doc_id] = arr/np.linalg.norm(arr, ord=1)
 
         TF_IDF[topic_id] = doc_dict
 
@@ -143,7 +137,7 @@ def tf_idf():
         vector = tf_idf_query[topic_id]
         scores = []
         for doc_id in dic:
-            scores.append((doc_id, np.dot(vector, dic[doc_id])))
+            scores.append((doc_id, np.dot(vector, dic[doc_id])/(np.linalg.norm(vector)*np.linalg.norm(dic[doc_id]))))
 
         tf_idf_topic_documents[topic_id] = np.array(scores, dtype=[('docid', np.uint32), ('score', np.float32)])
         tf_idf_topic_documents[topic_id] = np.sort(tf_idf_topic_documents[topic_id], order='score')[::-1]
@@ -162,7 +156,7 @@ def printable_res(sorted_tfidf: dict, run_name: str):
             if counter < 100:
                 doc_id = tup['docid']
                 score = '{:.2f}'.format(tup['score'])
-                string = f'{{{topic_id}}} Q0 {{{doc_id}}} {{{counter+1}}} {{{score}}} {{{run_name}}}'
+                string = f'{topic_id} Q0 {doc_id} {counter+1} {score} {run_name}'
                 lis.append(string)
                 big_list.append(string)
                 counter += 1
