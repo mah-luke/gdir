@@ -10,12 +10,13 @@ import createindex
 import numpy as np
 from multiprocessing import Pool
 import collections
-import json
+from createindex import timed
 
-
+logging.basicConfig(level=10)
 LOGGER = logging.getLogger('evaluation_mode')
 
 
+@timed()
 def parse_topics(data_path):
     LOGGER.info('Parsing topics')
     file_path = os.path.join(data_path, 'topics.xml')
@@ -31,6 +32,7 @@ def parse_topics(data_path):
     return parse_dict
 
 
+@timed()
 def document_number(path: str):
     titles = []
 
@@ -43,6 +45,7 @@ def document_number(path: str):
     return len(titles)
 
 
+@timed()
 def tf_idf_cosine_similarity():
     """
 
@@ -84,8 +87,8 @@ def tf_idf_cosine_similarity():
 
     """
     LOGGER.info('Ranking results with TF-IDF')
-    dataset = createindex.load(os.path.join('out', 'inverted_index.npy'))
-    topics = parse_topics('GIR2021 dataset')
+    dataset = createindex.load(os.path.join('..', 'out', 'inverted_index.npz'))
+    topics = parse_topics(os.path.join('..', '..', 'GIR2021 dataset'))
     word_count = {}
 
     for token, arr in dataset.items():
@@ -145,6 +148,7 @@ def tf_idf_cosine_similarity():
     return tf_idf_topic_documents
 
 
+@timed()
 def tf_idf():
     """
 
@@ -186,9 +190,9 @@ def tf_idf():
 
     """
     LOGGER.info('Ranking results with TF-IDF')
-    dataset = createindex.load(os.path.join('out', 'inverted_index.npy'))
+    dataset = createindex.load(os.path.join('..', 'out', 'inverted_index.npz'))
     df = {}
-    topics = parse_topics('GIR2021 dataset')
+    topics = parse_topics(os.path.join('..', '..', 'GIR2021 dataset'))
     word_count = {}
 
     for token, arr in dataset.items():
@@ -230,10 +234,11 @@ def tf_idf():
     return tf_idf_topic_documents
 
 
+@timed()
 def bm25(k1: float, b: float):
     LOGGER.info('Ranking results with BM25')
-    dataset = createindex.load(os.path.join('out', 'inverted_index.npy'))
-    topics = parse_topics('GIR2021 dataset')
+    dataset = createindex.load(os.path.join('..', 'out', 'inverted_index.npz'))
+    topics = parse_topics(os.path.join('..', '..', 'GIR2021 dataset'))
     word_count = {}
     avg_doc_length = 0
     TF = {}
@@ -288,12 +293,12 @@ def bm25(k1: float, b: float):
 
     return bm25_record
 
-
-def printable_res(sorted_tfidf: dict, run_name: str):
+@timed()
+def printable_res(sorted_res: dict, run_name: str):
     string_dict = {}
     big_list = []
 
-    for topic_id, arr in sorted_tfidf.items():
+    for topic_id, arr in sorted_res.items():
         lis = []
         counter = 0
         for tup in arr:
@@ -307,12 +312,18 @@ def printable_res(sorted_tfidf: dict, run_name: str):
 
         string_dict[topic_id] = np.array(lis, dtype='<U100')
 
-    save(os.path.join('out'), big_list)
+    if run_name == 'tfidf':
+        save(os.path.join('..', 'out'), big_list, 'tfidf_title_only.txt')
+    elif run_name == 'bm25':
+        save(os.path.join('..', 'out'), big_list, 'bm25_title_only.txt')
+    elif run_name == 'tfidf_cs':
+        save(os.path.join('..', 'out'), big_list, 'tfidf_cs_title_only.txt')
 
 
-def save(path, data: list):
+@timed()
+def save(path, data: list, name: str):
 
-    file_path = os.path.join(path, 'tfidf_title_only.txt')
+    file_path = os.path.join(path, name)
     textfile = open(file_path, 'w')
     for element in data:
         textfile.write(element + '\n')

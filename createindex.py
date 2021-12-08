@@ -21,6 +21,7 @@ import logging
 import json
 from multiprocessing import Pool
 
+logging.basicConfig(level=15)
 LOGGER = logging.getLogger('createindex')
 
 
@@ -155,9 +156,6 @@ def calc_dict_size(d):
 
 @timed(20)
 def merge_to_index(inv_i: Dict[str, np.ndarray], articles: Dict[np.ushort, Dict[str, np.uint16]]):
-    # LOGGER.info(f"Articles: length: {len(articles)} bytes: {(sys.getsizeof(articles)):,}")
-    # LOGGER.info(f"Inverted index: length: {len(inv_i)} bytes: {(sys.getsizeof(inv_i)):,}")
-
     merged = {}
 
     # transform to inverted index first
@@ -177,17 +175,6 @@ def merge_to_index(inv_i: Dict[str, np.ndarray], articles: Dict[np.ushort, Dict[
             inv_i[token] = np.append(inv_i[token],
                                      np.array(value, dtype=[('docid', np.uint32), ('tf', np.uint32)]))
 
-    # print(inv_i)
-
-    # for doc_id, doc in articles.items():
-    #     for token, cnt in doc.items():
-    #         if token not in inv_i:
-    #             inv_i[token] = np.array([], dtype=[('docid', np.uint32), ('tf', np.uint32)])
-    #
-    #         arr: np.ndarray = inv_i[token]
-    #         inv_i[token] = np.concatenate(
-    #             (arr, np.array((doc_id, cnt), dtype=[('docid', np.uint32), ('tf', np.uint32)])))
-
     return inv_i
 
 
@@ -198,28 +185,28 @@ def save(path, data: dict):
     if not os.path.exists(os.path.dirname(path)):
         os.makedirs(os.path.dirname(path))
 
-    print(len(data))
-    np.save(os.path.join(path, "inverted_index.npy"), data)
-    np.savez_compressed(os.path.join(path, "inverted_index.npy.npz"), data)
+    # np.save(os.path.join(path, "inverted_index.npy"), data)
+    np.savez_compressed(path, data)
 
 
 @timed()
 def load(path) -> {}:
     LOGGER.info("Loading File")
 
-    data = np.load(path, allow_pickle=True)[()]  # ['arr_0'][()]
+    data = np.load(path, allow_pickle=True)['arr_0'][()]
 
     return data
 
 
 @timed(20)
-def process_data(data_path):
+def process_data(data_path, saving_path):
     # load wiki files
     LOGGER.info(f"Loading files for path: {data_path}")
 
     time_start = time()
     # inv_i = pd.Series(dtype=np.uint16)
     inv_i = {}
+    files = {}
     documents = 0
 
     with Pool(processes=6) as pool:
@@ -243,9 +230,12 @@ def process_data(data_path):
                         articles[doc_id] = doc_index
 
                 inv_i = merge_to_index(inv_i, articles)
-                # LOGGER.info(f"Articles: length: {len(articles)} bytes: {(sys.getsizeof(articles)):,}")
-                # LOGGER.info(f"Inverted index: length: {len(inv_i)} bytes: {(sys.getsizeof(inv_i)):,}")
-                calc_dict_size(inv_i)
+
+                # keys = list(articles.keys())
+                # keys.sort()
+                files[file_path] = np.array(list(articles.keys()), dtype=np.uint32)
+                files[file_path].sort()
+                # calc_dict_size(inv_i)
 
             time_file_loaded = time()
             LOGGER.info(
@@ -255,19 +245,17 @@ def process_data(data_path):
     for token, arr in inv_i.items():
         arr.sort(order='docid')
 
-    save(os.path.join("..", "out"), inv_i)
+    save(os.path.join(saving_path, "inverted_index.npz"), inv_i)
+    save(os.path.join(saving_path, "file_doc_index.npz"), files)
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=20)
+
     logging.addLevelName(15, "TIMING")
     # replace with individual path to dataset
     LOGGER.debug("Starting index creation...")
-    process_data(os.path.join("..", "..", "dataset"))
+    process_data(os.path.join("..", "..", "GIR2021 dataset"), os.path.join("..", "out"))
     #
-    # d = load(os.path.join("..", "out", "inverted_index.npy"))
+    # d = load(os.path.join("..", "out", "file_doc_index.npz"))
     # print(len(d))
     # print(d)
-
-    # with Pool(6) as pool:
-    #     text2tokens("I have an ssd and I\n\t\t\t like it. This is good! I like it.", pool)
