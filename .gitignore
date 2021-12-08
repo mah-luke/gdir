@@ -1,3 +1,6 @@
 .idea/
 GIR2021 dataset/
 out/
+test/
+.DS_Store
+__pycache__
